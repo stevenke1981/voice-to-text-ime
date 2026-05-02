@@ -10,17 +10,38 @@ pub struct WhisperEngine {
     tokenizer: Tokenizer,
     config: Config,
     mel_filters: Vec<f32>,
+    pub language: String,
 }
 
 impl WhisperEngine {
-    pub fn new() -> Result<Self> {
+    pub fn new(model_size: &str, language: &str) -> Result<Self> {
         let device = Device::new_cuda(0).context("CUDA is required but not available")?;
         
         let api = Api::new()?;
-        let model_repo = api.model("oxide-lab/whisper-tiny-GGUF".to_string());
-        let config_repo = api.model("openai/whisper-tiny".to_string());
+        let model_id = match model_size {
+            "tiny" => "oxide-lab/whisper-tiny-GGUF",
+            "base" => "oxide-lab/whisper-base-GGUF",
+            "small" => "oxide-lab/whisper-small-GGUF",
+            _ => "oxide-lab/whisper-tiny-GGUF",
+        };
+        let config_id = match model_size {
+            "tiny" => "openai/whisper-tiny",
+            "base" => "openai/whisper-base",
+            "small" => "openai/whisper-small",
+            _ => "openai/whisper-tiny",
+        };
         
-        let model_path = model_repo.get("whisper-tiny-q4_k.gguf")?;
+        let model_repo = api.model(model_id.to_string());
+        let config_repo = api.model(config_id.to_string());
+        
+        let model_file = match model_size {
+            "tiny" => "whisper-tiny-q4_0.gguf",
+            "base" => "whisper-base-q4_0.gguf",
+            "small" => "whisper-small-q4_0.gguf",
+            _ => "whisper-tiny-q4_0.gguf",
+        };
+
+        let model_path = model_repo.get(model_file)?;
         let tokenizer_path = config_repo.get("tokenizer.json")?;
         let config_path = config_repo.get("config.json")?;
 
@@ -43,6 +64,7 @@ impl WhisperEngine {
             tokenizer,
             config,
             mel_filters,
+            language: language.to_string(),
         })
     }
 
@@ -57,9 +79,10 @@ impl WhisperEngine {
         
         let audio_features = self.model.encoder.forward(&mel, true)?;
 
+        let lang_token = format!("<|{}|>", self.language);
         let mut tokens = vec![
             self.tokenizer.token_to_id("<|startoftranscript|>").unwrap_or(50258),
-            self.tokenizer.token_to_id("<|zh|>").unwrap_or(50260),
+            self.tokenizer.token_to_id(&lang_token).unwrap_or(50260),
             self.tokenizer.token_to_id("<|transcribe|>").unwrap_or(50359),
             self.tokenizer.token_to_id("<|notimestamps|>").unwrap_or(50363),
         ];

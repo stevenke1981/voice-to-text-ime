@@ -44,8 +44,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Self {
-        let config = load_config();
+    pub fn with_config(config: UserConfig) -> Self {
         Self {
             config,
             is_recording: false,
@@ -58,8 +57,15 @@ impl AppState {
     }
 }
 
+fn config_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("config.json")))
+        .unwrap_or_else(|| std::path::PathBuf::from("config.json"))
+}
+
 pub fn load_config() -> UserConfig {
-    if let Ok(data) = std::fs::read_to_string("config.json") {
+    if let Ok(data) = std::fs::read_to_string(config_path()) {
         if let Ok(config) = serde_json::from_str(&data) {
             return config;
         }
@@ -69,6 +75,6 @@ pub fn load_config() -> UserConfig {
 
 pub fn save_config(config: &UserConfig) {
     if let Ok(data) = serde_json::to_string_pretty(config) {
-        let _ = std::fs::write("config.json", data);
+        let _ = std::fs::write(config_path(), data);
     }
 }

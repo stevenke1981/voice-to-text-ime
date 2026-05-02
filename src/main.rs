@@ -19,6 +19,7 @@ fn main() -> Result<()> {
     let (engine_tx, engine_rx) = unbounded::<AppEvent>();
 
     let initial_config = state::load_config();
+    let gui_config = initial_config.clone();
     let mode = Arc::new(Mutex::new(initial_config.mode));
 
     // ── Keyboard listener ──────────────────────────────────────────────────
@@ -68,11 +69,9 @@ fn main() -> Result<()> {
                         let _ = engine_tx_kb.send(AppEvent::StopRecording);
                     }
                 }
-                EventType::KeyPress(Key::KeyM) => {
-                    if ctrl && alt {
-                        let mut m = mode_kb.lock().unwrap();
-                        *m = if *m == Mode::HoldToTalk { Mode::Toggle } else { Mode::HoldToTalk };
-                    }
+                EventType::KeyPress(Key::KeyM) if ctrl && alt => {
+                    let mut m = mode_kb.lock().unwrap();
+                    *m = if *m == Mode::HoldToTalk { Mode::Toggle } else { Mode::HoldToTalk };
                 }
                 _ => {}
             }
@@ -142,7 +141,7 @@ fn main() -> Result<()> {
             .with_transparent(true)
             .with_decorations(false)
             .with_always_on_top()
-            .with_inner_size([400.0, 80.0])
+            .with_inner_size([gui::WIN_W, gui::WIN_H])
             // Start visible + passthrough so DWM transparency is init'd correctly.
             // gui.rs disables passthrough when active (recording / settings).
             .with_mouse_passthrough(true),
@@ -154,7 +153,7 @@ fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             let tray = tray::setup_tray();
-            Box::new(gui::VoiceInputGui::new(cc, gui_rx, engine_tx, gui_tx_gui, tray))
+            Box::new(gui::VoiceInputGui::new(cc, gui_config, gui_rx, engine_tx, gui_tx_gui, tray))
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI 啟動失敗: {e}"))?;
