@@ -4,6 +4,7 @@ use crate::state::{AppState, AppEvent, Mode, save_config};
 use crate::tray::TrayHandle;
 use crate::autostart;
 use crossbeam_channel::{Receiver, Sender};
+use tray_icon::{MouseButton, TrayIconEvent};
 
 // ── Fixed window geometry (never changes at runtime) ──────────────────────────
 pub const WIN_W: f32 = 400.0;
@@ -50,13 +51,14 @@ impl VoiceInputGui {
         // Dedicated thread does a blocking recv; no polling in the update loop.
         let quit_id     = tray.quit_id.clone();
         let settings_id = tray.settings_id.clone();
+        let gui_tx_menu = gui_tx.clone();
         thread::spawn(move || {
             while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().recv() {
                 if ev.id == quit_id {
-                    let _ = gui_tx.send(AppEvent::TrayQuit);
+                    let _ = gui_tx_menu.send(AppEvent::TrayQuit);
                     break;
                 } else if ev.id == settings_id {
-                    let _ = gui_tx.send(AppEvent::TrayToggleSettings);
+                    let _ = gui_tx_menu.send(AppEvent::TrayToggleSettings);
                 }
             }
         });
@@ -108,7 +110,14 @@ impl eframe::App for VoiceInputGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let now = ctx.input(|i| i.time);
 
+        let settings_was_visible = self.state.show_settings;
         process_events(&mut self.state, &self.event_rx, now);
+        process_tray_icon_events(&mut self.state);
+        if self.state.show_settings && !settings_was_visible {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
 
         let showing_result = now < self.state.result_display_until
             && !self.state.last_text.is_empty();
@@ -128,7 +137,7 @@ impl eframe::App for VoiceInputGui {
             .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 if self.state.show_settings {
-                    draw_settings(ui, &mut self.state, &self.engine_tx, &mut self.autostart_enabled);
+                    draw_settings(ui, &mut self.state, &self.engine_tx, &mut self.autostart_enabled, ctx);
                 } else if is_active {
                     draw_status(ui, &self.state, now, showing_result, ctx);
                 }
@@ -167,6 +176,14 @@ fn process_events(state: &mut AppState, rx: &Receiver<AppEvent>, now: f64) {
                 state.status = s;
             }
             AppEvent::UpdateConfig(c) => state.config = c,
+        }
+    }
+}
+
+fn process_tray_icon_events(state: &mut AppState) {
+    while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+        if matches!(ev, TrayIconEvent::Click { button: MouseButton::Left, .. }) {
+            state.show_settings = true;
         }
     }
 }
@@ -260,6 +277,7 @@ fn draw_settings(
     state: &mut AppState,
     engine_tx: &Sender<AppEvent>,
     autostart: &mut bool,
+    ctx: &egui::Context,
 ) {
     let panel = egui::Rect::from_min_size(
         egui::pos2(PNL_PAD, PNL_PAD),
@@ -272,6 +290,14 @@ fn draw_settings(
         egui::Rounding::same(16.0),
         egui::Color32::from_rgba_unmultiplied(16, 16, 26, 238),
     );
+
+    let drag_rect = egui::Rect::from_min_size(
+        panel.min,
+        egui::vec2(PNL_W - 48.0, 48.0),
+    );
+    if ui.interact(drag_rect, egui::Id::new("settings_drag"), egui::Sense::drag()).dragged() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
 
     // Content (inside panel margin)
     let mut c = ui.child_ui(panel.shrink(PNL_MARGIN), egui::Layout::top_down(egui::Align::Min));
