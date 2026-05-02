@@ -4,6 +4,7 @@ mod audio;
 mod tray;
 mod gui;
 mod state;
+mod autostart;
 
 use anyhow::Result;
 use rdev::{listen, EventType, Key};
@@ -141,8 +142,10 @@ fn main() -> Result<()> {
             .with_transparent(true)
             .with_decorations(false)
             .with_always_on_top()
-            .with_inner_size([400.0, 272.0])
-            .with_visible(false),   // start hidden; shown on first recording/settings
+            .with_inner_size([400.0, 80.0])
+            // Start visible + passthrough so DWM transparency is init'd correctly.
+            // gui.rs disables passthrough when active (recording / settings).
+            .with_mouse_passthrough(true),
         ..Default::default()
     };
 
