@@ -17,29 +17,28 @@ fn main() -> Result<()> {
     let (gui_tx, gui_rx) = unbounded::<AppEvent>();
     let (engine_tx, engine_rx) = unbounded::<AppEvent>();
 
-    // Load config once; use it to init mode so saved mode survives restarts
     let initial_config = state::load_config();
     let mode = Arc::new(Mutex::new(initial_config.mode));
 
-    // ── Keyboard listener thread ───────────────────────────────────────────
+    // ── Keyboard listener ──────────────────────────────────────────────────
     let engine_tx_kb = engine_tx.clone();
     let mode_kb = Arc::clone(&mode);
     thread::spawn(move || {
-        let mut ctrl_pressed = false;
-        let mut alt_pressed = false;
+        let mut ctrl = false;
+        let mut alt = false;
         let mut key_down = false;
         let mut recording = false;
 
         listen(move |event| {
             match event.event_type {
                 EventType::KeyPress(Key::ControlLeft) | EventType::KeyPress(Key::ControlRight) => {
-                    ctrl_pressed = true;
+                    ctrl = true;
                 }
                 EventType::KeyRelease(Key::ControlLeft) | EventType::KeyRelease(Key::ControlRight) => {
-                    ctrl_pressed = false;
+                    ctrl = false;
                 }
                 EventType::KeyPress(Key::Alt) | EventType::KeyPress(Key::AltGr) => {
-                    alt_pressed = true;
+                    alt = true;
                     if !key_down {
                         key_down = true;
                         let m = *mode_kb.lock().unwrap();
@@ -61,7 +60,7 @@ fn main() -> Result<()> {
                     }
                 }
                 EventType::KeyRelease(Key::Alt) | EventType::KeyRelease(Key::AltGr) => {
-                    alt_pressed = false;
+                    alt = false;
                     key_down = false;
                     if *mode_kb.lock().unwrap() == Mode::HoldToTalk && recording {
                         recording = false;
@@ -69,7 +68,7 @@ fn main() -> Result<()> {
                     }
                 }
                 EventType::KeyPress(Key::KeyM) => {
-                    if ctrl_pressed && alt_pressed {
+                    if ctrl && alt {
                         let mut m = mode_kb.lock().unwrap();
                         *m = if *m == Mode::HoldToTalk { Mode::Toggle } else { Mode::HoldToTalk };
                     }
@@ -80,24 +79,22 @@ fn main() -> Result<()> {
         .expect("無法啟動全域監聽");
     });
 
-    // ── Engine thread ──────────────────────────────────────────────────────
+    // ── Engine ────────────────────────────────────────────────────────────
     let gui_tx_eng = gui_tx.clone();
     let mode_eng = Arc::clone(&mode);
     thread::spawn(move || -> Result<()> {
         let mut recorder = audio::AudioRecorder::new()?;
         let mut engine = whisper::WhisperEngine::new(&initial_config.model_size, &initial_config.language)?;
         let mut enigo = Enigo::new();
-        let mut current_config = initial_config;
+        let mut cfg = initial_config;
 
         while let Ok(event) = engine_rx.recv() {
             match event {
-                AppEvent::UpdateConfig(new_config) => {
-                    // Sync mode into the shared mutex so the keyboard thread sees it
-                    *mode_eng.lock().unwrap() = new_config.mode;
-
-                    if new_config.model_size != current_config.model_size {
+                AppEvent::UpdateConfig(new_cfg) => {
+                    *mode_eng.lock().unwrap() = new_cfg.mode;
+                    if new_cfg.model_size != cfg.model_size {
                         let _ = gui_tx_eng.send(AppEvent::StatusChanged("載入新模型中...".to_string()));
-                        match whisper::WhisperEngine::new(&new_config.model_size, &new_config.language) {
+                        match whisper::WhisperEngine::new(&new_cfg.model_size, &new_cfg.language) {
                             Ok(e) => {
                                 engine = e;
                                 let _ = gui_tx_eng.send(AppEvent::StatusChanged("模型載入完成".to_string()));
@@ -107,9 +104,9 @@ fn main() -> Result<()> {
                             }
                         }
                     } else {
-                        engine.language = new_config.language.clone();
+                        engine.language = new_cfg.language.clone();
                     }
-                    current_config = new_config;
+                    cfg = new_cfg;
                 }
                 AppEvent::StartRecording => {
                     let _ = gui_tx_eng.send(AppEvent::StartRecording);
@@ -119,14 +116,12 @@ fn main() -> Result<()> {
                 }
                 AppEvent::StopRecording => {
                     let _ = gui_tx_eng.send(AppEvent::StopRecording);
-                    let audio_data = recorder.stop_recording();
-                    match engine.transcribe(&audio_data) {
+                    let audio = recorder.stop_recording();
+                    match engine.transcribe(&audio) {
                         Ok(text) => {
-                            let trimmed = text.trim().to_string();
-                            if !trimmed.is_empty() {
-                                enigo.key_sequence(&trimmed);
-                            }
-                            let _ = gui_tx_eng.send(AppEvent::TranscriptionResult(trimmed));
+                            let t = text.trim().to_string();
+                            if !t.is_empty() { enigo.key_sequence(&t); }
+                            let _ = gui_tx_eng.send(AppEvent::TranscriptionResult(t));
                         }
                         Err(e) => {
                             let _ = gui_tx_eng.send(AppEvent::StatusChanged(format!("辨識錯誤: {e}")));
@@ -139,15 +134,15 @@ fn main() -> Result<()> {
         Ok(())
     });
 
-    // ── GUI ────────────────────────────────────────────────────────────────
+    // ── GUI ───────────────────────────────────────────────────────────────
+    let gui_tx_gui = gui_tx.clone();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_transparent(true)
             .with_decorations(false)
             .with_always_on_top()
-            .with_inner_size([400.0, 80.0])
-            .with_active(true)
-            .with_mouse_passthrough(true), // idle default; gui.rs toggles per-frame
+            .with_inner_size([400.0, 272.0])
+            .with_visible(false),   // start hidden; shown on first recording/settings
         ..Default::default()
     };
 
@@ -156,7 +151,7 @@ fn main() -> Result<()> {
         options,
         Box::new(|cc| {
             let tray = tray::setup_tray();
-            Box::new(gui::VoiceInputGui::new(cc, gui_rx, engine_tx, tray))
+            Box::new(gui::VoiceInputGui::new(cc, gui_rx, engine_tx, gui_tx_gui, tray))
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI 啟動失敗: {e}"))?;

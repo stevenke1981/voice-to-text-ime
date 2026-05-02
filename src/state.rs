@@ -29,6 +29,8 @@ pub enum AppEvent {
     TranscriptionResult(String),
     StatusChanged(String),
     UpdateConfig(UserConfig),
+    TrayQuit,
+    TrayToggleSettings,
 }
 
 pub struct AppState {
