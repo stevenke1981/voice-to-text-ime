@@ -1,14 +1,15 @@
 use anyhow::{anyhow, Context, Result};
 use candle_core::{Device, Tensor};
-use candle_transformers::models::whisper::{self, Config};
+use candle_transformers::models::whisper::{Config, audio, quantized_model::Whisper};
 use hf_hub::api::sync::Api;
 use tokenizers::Tokenizer;
 
 pub struct WhisperEngine {
     device: Device,
-    model: whisper::model::Whisper,
+    model: Whisper,
     tokenizer: Tokenizer,
     config: Config,
+    mel_filters: Vec<f32>,
 }
 
 impl WhisperEngine {
@@ -16,35 +17,69 @@ impl WhisperEngine {
         let device = Device::new_cuda(0).context("CUDA is required but not available")?;
         
         let api = Api::new()?;
-        let repo = api.model("openai/whisper-tiny".to_string());
+        let model_repo = api.model("oxide-lab/whisper-tiny-GGUF".to_string());
+        let config_repo = api.model("openai/whisper-tiny".to_string());
         
-        let model_path = repo.get("model.safetensors")?;
-        let tokenizer_path = repo.get("tokenizer.json")?;
-        let config_path = repo.get("config.json")?;
+        let model_path = model_repo.get("whisper-tiny-q4_k.gguf")?;
+        let tokenizer_path = config_repo.get("tokenizer.json")?;
+        let config_path = config_repo.get("config.json")?;
 
         let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
         let config: Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
         
-        // Note: For now, we load the standard tiny model to verify GPU works.
-        // We will switch to candle-quantized once the basic GPU pipeline is verified.
-        let vb = unsafe { 
-            candle_nn::VarBuilder::from_safetensors(vec![model_path], candle_core::DType::F32, &device)? 
-        };
-        let model = whisper::model::Whisper::load(&vb, config.clone())?;
+        let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(&model_path, &device)?;
+        let model = Whisper::load(&vb, config.clone())?;
+
+        // 載入 Mel Filters
+        let mel_filters_bytes = include_bytes!("../melfilters.bytes");
+        let mel_filters: Vec<f32> = mel_filters_bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
 
         Ok(Self {
             device,
             model,
             tokenizer,
             config,
+            mel_filters,
         })
     }
 
     pub fn transcribe(&mut self, pcm_data: &[f32]) -> Result<String> {
-        let mel_filters = self.config.num_mel_bins;
-        // Whisper expects a specific mel spectrogram input.
-        // For brevity in this initial version, we'll assume the audio processing is handled.
-        // This is a placeholder for the actual mel transformation and decoding loop.
-        Ok("辨識文字預留位置".to_string())
+        if pcm_data.is_empty() {
+            return Ok("".to_string());
+        }
+
+        let mel = audio::pcm_to_mel(&self.config, pcm_data, &self.mel_filters);
+        let mel_len = mel.len();
+        let mel = Tensor::from_vec(mel, (1, self.config.num_mel_bins, mel_len / self.config.num_mel_bins), &self.device)?;
+        
+        let audio_features = self.model.encoder.forward(&mel, true)?;
+
+        let mut tokens = vec![
+            self.tokenizer.token_to_id("<|startoftranscript|>").unwrap_or(50258),
+            self.tokenizer.token_to_id("<|zh|>").unwrap_or(50260),
+            self.tokenizer.token_to_id("<|transcribe|>").unwrap_or(50359),
+            self.tokenizer.token_to_id("<|notimestamps|>").unwrap_or(50363),
+        ];
+
+        for _i in 0..self.config.max_target_positions {
+            let token_t = Tensor::new(&tokens[..], &self.device)?.unsqueeze(0)?;
+            let logits = self.model.decoder.forward(&token_t, &audio_features, true)?;
+            let logits = logits.squeeze(0)?;
+            let last_logits = logits.get(logits.dim(0)? - 1)?;
+            
+            let next_token = last_logits.argmax(0)?.to_scalar::<u32>()?;
+            
+            // 使用 tokenizer 獲取 EOT ID 或從 config (雖然 config 沒這欄位，通常是 50257)
+            if next_token == 50257 {
+                break;
+            }
+            tokens.push(next_token);
+        }
+
+        let text = self.tokenizer.decode(&tokens, true).map_err(|e| anyhow!(e))?;
+        Ok(text)
     }
 }
