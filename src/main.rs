@@ -135,28 +135,8 @@ fn main() -> Result<()> {
     });
 
     // ── GUI ───────────────────────────────────────────────────────────────
-    let gui_tx_gui = gui_tx.clone();
-    let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_transparent(true)
-            .with_decorations(false)
-            .with_always_on_top()
-            .with_inner_size([gui::WIN_W, gui::WIN_H])
-            // Start visible + passthrough so DWM transparency is init'd correctly.
-            // gui.rs disables passthrough when active (recording / settings).
-            .with_mouse_passthrough(true),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Voice-to-Text IME",
-        options,
-        Box::new(|cc| {
-            let tray = tray::setup_tray();
-            Box::new(gui::VoiceInputGui::new(cc, gui_config, gui_rx, engine_tx, gui_tx_gui, tray))
-        }),
-    )
-    .map_err(|e| anyhow::anyhow!("GUI 啟動失敗: {e}"))?;
+    let tray = tray::setup_tray();
+    gui::run_gui(gui_config, gui_rx, engine_tx, gui_tx.clone(), tray)?;
 
     Ok(())
 }

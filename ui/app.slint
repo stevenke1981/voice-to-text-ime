@@ -1,0 +1,215 @@
+import { Button, CheckBox, ComboBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component VoiceInputWindow inherits Window {
+    title: "Voice-to-Text IME";
+    width: 430px;
+    height: settings-visible ? 390px : 118px;
+    always-on-top: true;
+    background: #10131c;
+
+    in property <bool> settings-visible;
+    in property <bool> autostart-enabled;
+    in property <int> mode-index;
+    in property <int> language-index;
+    in property <int> model-index;
+    in property <string> status-text: "就緒";
+    in property <string> result-text;
+    in property <int> status-kind;
+
+    callback close-requested();
+    callback mode-changed(string);
+    callback language-changed(string);
+    callback model-changed(string);
+    callback autostart-changed(bool);
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #10131c;
+
+        if (settings-visible) : Rectangle {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+            border-radius: 10px;
+            background: #171b27;
+            border-width: 1px;
+            border-color: #2b3244;
+
+            VerticalBox {
+                x: 22px;
+                y: 20px;
+                width: parent.width - 44px;
+                height: parent.height - 40px;
+                spacing: 14px;
+
+                HorizontalBox {
+                    height: 34px;
+                    Text {
+                        text: "Voice-to-Text IME";
+                        color: #f5f7fb;
+                        font-size: 20px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: "關閉";
+                        clicked => { root.close-requested(); }
+                    }
+                }
+
+                Rectangle {
+                    height: 68px;
+                    border-radius: 8px;
+                    background: #0f1420;
+                    border-width: 1px;
+                    border-color: #263043;
+
+                    HorizontalBox {
+                        x: 16px;
+                        y: 12px;
+                        width: parent.width - 32px;
+                        height: parent.height - 24px;
+                        spacing: 12px;
+
+                        Rectangle {
+                            width: 42px;
+                            height: 42px;
+                            border-radius: 21px;
+                            background: status-kind == 1 ? #ef4444 : status-kind == 2 ? #3b82f6 : status-kind == 3 ? #22c55e : #475569;
+                            Text {
+                                text: status-kind == 1 ? "●" : status-kind == 2 ? "…" : status-kind == 3 ? "✓" : "◎";
+                                color: white;
+                                font-size: 18px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalBox {
+                            spacing: 3px;
+                            Text {
+                                text: status-text;
+                                color: #f8fafc;
+                                font-size: 16px;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: result-text == "" ? "Alt 按住說話，Ctrl+Alt+M 切換模式" : result-text;
+                                color: #98a2b3;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: #2b3244; }
+
+                HorizontalBox {
+                    height: 36px;
+                    Text { text: "語言"; color: #cbd5e1; font-size: 14px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    ComboBox {
+                        width: 180px;
+                        model: ["中文", "English", "日本語", "한국어"];
+                        current-index: language-index;
+                        selected(index) => { root.language-changed(index); }
+                    }
+                }
+
+                HorizontalBox {
+                    height: 36px;
+                    Text { text: "模型大小"; color: #cbd5e1; font-size: 14px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    ComboBox {
+                        width: 180px;
+                        model: ["Tiny - 最快速", "Base - 均衡", "Small - 最準確"];
+                        current-index: model-index;
+                        selected(index) => { root.model-changed(index); }
+                    }
+                }
+
+                HorizontalBox {
+                    height: 36px;
+                    Text { text: "輸入模式"; color: #cbd5e1; font-size: 14px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    ComboBox {
+                        width: 180px;
+                        model: ["按住說話", "切換模式"];
+                        current-index: mode-index;
+                        selected(index) => { root.mode-changed(index); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: #2b3244; }
+
+                CheckBox {
+                    text: "開機自動啟動";
+                    checked: autostart-enabled;
+                    toggled => { root.autostart-changed(self.checked); }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                Text {
+                    text: "系統匣圖示可開啟設定。關閉視窗後程式會繼續在背景執行。";
+                    color: #64748b;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if (!settings-visible) : Rectangle {
+            x: 14px;
+            y: 14px;
+            width: parent.width - 28px;
+            height: parent.height - 28px;
+            border-radius: 10px;
+            background: #171b27;
+            border-width: 1px;
+            border-color: #2b3244;
+
+            HorizontalBox {
+                x: 18px;
+                y: 15px;
+                width: parent.width - 36px;
+                height: parent.height - 30px;
+                spacing: 12px;
+
+                Rectangle {
+                    width: 42px;
+                    height: 42px;
+                    border-radius: 21px;
+                    background: status-kind == 1 ? #ef4444 : status-kind == 2 ? #3b82f6 : status-kind == 3 ? #22c55e : #475569;
+                    Text {
+                        text: status-kind == 1 ? "●" : status-kind == 2 ? "…" : status-kind == 3 ? "✓" : "◎";
+                        color: white;
+                        font-size: 18px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                VerticalBox {
+                    spacing: 4px;
+                    Text {
+                        text: status-text;
+                        color: #f8fafc;
+                        font-size: 17px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: result-text;
+                        color: #98a2b3;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -33,30 +33,6 @@ pub enum AppEvent {
     TrayToggleSettings,
 }
 
-pub struct AppState {
-    pub config: UserConfig,
-    pub is_recording: bool,
-    pub is_transcribing: bool,
-    pub last_text: String,
-    pub status: String,
-    pub show_settings: bool,
-    pub result_display_until: f64,
-}
-
-impl AppState {
-    pub fn with_config(config: UserConfig) -> Self {
-        Self {
-            config,
-            is_recording: false,
-            is_transcribing: false,
-            last_text: String::new(),
-            status: "就緒".to_string(),
-            show_settings: false,
-            result_display_until: 0.0,
-        }
-    }
-}
-
 fn config_path() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
